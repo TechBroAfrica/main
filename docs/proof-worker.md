@@ -93,13 +93,16 @@ without risk of leaking sensitive data.
 
 ## Rollout / rollback
 
-This change is additive at the call-site level: `App.tsx`'s
-`attachSilentWitnessProof` now calls `ProofWorkerClient.generate()` instead of
-calling `generateSilentWitnessProof` from `noirClient.ts` directly.
+This change is additive at the call-site level: `useEvidence.ts`'s `runProver`
+now calls `ProofWorkerClient.generate()` instead of calling
+`generateSilentWitnessProof` from `noirClient.ts` directly on the UI thread.
 `noirClient.ts` itself is unchanged and still the single source of truth for
-the actual proving logic — the worker only wraps it.
+the actual proving logic — the worker only wraps it. There is intentionally no
+main-thread proving fallback: when the capability floor is not met,
+`ProofWorkerClient` rejects with `UNSUPPORTED_ENVIRONMENT` before any
+credential/nullifier secret is transferred (see `BROWSER_SUPPORT.md`).
 
-To roll back, revert `App.tsx`'s `attachSilentWitnessProof` to call
+To roll back, revert `useEvidence.ts`'s `attachSilentWitnessProof` to call
 `generateSilentWitnessProof` from `noirClient.ts` directly on the main
 thread. No data migration, persisted state, or artifact format changes are
 involved — the change is confined to how/where the existing proving logic is

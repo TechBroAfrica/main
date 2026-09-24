@@ -1,12 +1,19 @@
 /**
  * useEvidence — manages the full evidence creation flow:
  * hashing → embedding → (optional) Noir proving → Stellar registration.
+ *
+ * Cancellation-aware: an in-flight stego upload can be aborted with an
+ * AbortSignal and Silent Witness proving runs in a cancellable module worker
+ * (never on the UI thread with witnesses in scope). Stale async results are
+ * ignored via a sequence guard. No media, secrets, witnesses, or keys are
+ * written to logs or user-facing messages beyond stable copy.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Building2, Fingerprint, KeyRound } from 'lucide-react'
-import type { IdentityTier, ProofPackage, Stage } from '../types'
+import type { IdentityTier, ProofPackage, SilentWitnessProof, Stage } from '../types'
 import type { RegisterProofResult } from '../stellarTypes'
+import { FlowCancelledError, isCancellationError, throwIfAborted } from '../utils'
 
 export const TIERS = [
   {
@@ -35,6 +42,18 @@ export const TIERS = [
 
 const CONTRACT_ID = import.meta.env.VITE_HARPOCRATES_REGISTRY_ID ?? ''
 
+// Privacy-safe stable copy — never includes file names, hashes, or secrets.
+const CANCELLED_MESSAGES: Record<Stage, string> = {
+  idle: 'Request cancelled.',
+  hashing: 'Upload cancelled.',
+  embedding: 'Upload cancelled.',
+  proving: 'Proof generation cancelled.',
+  ready: 'Request cancelled.',
+  registered: 'Request cancelled.',
+  error: 'Request cancelled.',
+  cancelled: 'Request cancelled.',
+}
+
 export type UseEvidenceReturn = {
   selectedTier: IdentityTier
   setSelectedTier: (tier: IdentityTier) => void
@@ -50,8 +69,10 @@ export type UseEvidenceReturn = {
   message: string
   registration: RegisterProofResult | null
   networkMismatch: string | null
+  isCancellable: boolean
   handleEvidence: (nextFile: File | null) => Promise<void>
   registerProof: (wallet: string) => Promise<void>
+  cancelEvidence: () => void
 }
 
 export function useEvidence(): UseEvidenceReturn {
@@ -66,23 +87,75 @@ export function useEvidence(): UseEvidenceReturn {
   const [registration, setRegistration] = useState<RegisterProofResult | null>(null)
   const [networkMismatch, setNetworkMismatch] = useState<string | null>(null)
 
+  // Sequence guard + abort plumbing so stale uploads/proofs cannot clobber
+  // a newer flow or a reset caused by cancellation.
+  const seqRef = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
+  const proofClientRef = useRef<import('../workers/proofWorkerClient').ProofWorkerClient | null>(null)
+  const proofRequestIdRef = useRef<string | null>(null)
+  const stageRef = useRef<Stage>('idle')
+
+  useEffect(() => {
+    stageRef.current = stage
+  }, [stage])
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+      proofClientRef.current?.destroy()
+    }
+  }, [])
+
   const selectedTierMeta = useMemo(
     () => TIERS.find((t) => t.id === selectedTier) ?? TIERS[0],
     [selectedTier],
   )
 
+  const isCancellable = stage === 'hashing' || stage === 'embedding' || stage === 'proving'
+
+  function resetFlow() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    seqRef.current += 1
+    const client = proofClientRef.current
+    if (client && proofRequestIdRef.current) {
+      client.cancel(proofRequestIdRef.current)
+    }
+    proofRequestIdRef.current = null
+    client?.destroy()
+    proofClientRef.current = null
+    if (processedVideoUrl) URL.revokeObjectURL(processedVideoUrl)
+    setProcessedVideoUrl('')
+    setProof(null)
+    setFile(null)
+    setRegistration(null)
+  }
+
   async function handleEvidence(nextFile: File | null) {
     if (!nextFile) return
+
+    // Cancel any prior flow so stale async writes never land in this one.
+    resetFlow()
+
+    const seq = seqRef.current + 1
+    seqRef.current = seq
+    const controller = new AbortController()
+    abortRef.current = controller
+    const { signal } = controller
 
     setFile(nextFile)
     setStage('hashing')
     setMessage('Hashing video locally in the browser.')
+    setNetworkMismatch(null)
 
     try {
       const { sha256 } = await import('../utils')
+      throwIfAborted(signal)
       const sourceHash = await sha256(await nextFile.arrayBuffer())
+      throwIfAborted(signal)
       const proofId = await sha256(`${sourceHash}:${crypto.randomUUID()}`)
       const timestamp = new Date().toISOString()
+      if (seq !== seqRef.current) return
 
       setStage('embedding')
       setMessage('Embedding portable Harpocrates metadata into the video.')
@@ -94,7 +167,10 @@ export function useEvidence(): UseEvidenceReturn {
         sourceHash,
         proofId,
         timestamp,
+        signal,
       )
+      if (seq !== seqRef.current) return
+      throwIfAborted(signal)
 
       if (processedVideoUrl) URL.revokeObjectURL(processedVideoUrl)
       setProcessedVideoUrl(URL.createObjectURL(embeddedBlob))
@@ -110,6 +186,15 @@ export function useEvidence(): UseEvidenceReturn {
       setStage('ready')
       setMessage('Embedded evidence package is ready for Stellar registration.')
     } catch (error) {
+      if (seq !== seqRef.current) return
+      if (isCancellationError(error) || signal.aborted) {
+        // The upload itself is the cancellable work here, so the copy matches
+        // the Cancel button even when the async rejection lands after the
+        // button handler already wrote the cancelled message.
+        setStage('cancelled')
+        setMessage(CANCELLED_MESSAGES.embedding)
+        return
+      }
       setStage('error')
       setMessage(error instanceof Error ? error.message : 'Evidence processing failed.')
     }
@@ -145,13 +230,15 @@ export function useEvidence(): UseEvidenceReturn {
       return
     }
 
+    const seq = seqRef.current
     setMessage(`Submitting ${selectedTierMeta.title} proof to Stellar Testnet.`)
 
     try {
       const proofForRegistration =
         selectedTier === 'silent' && !proof.silentWitness
-          ? await attachSilentWitnessProof(proof)
+          ? await attachSilentWitnessProof(proof, seq, abortRef.current?.signal)
           : proof
+      if (seq !== seqRef.current) return
 
       const { registerProofOnStellar } = await import('../stellar')
       const result = await registerProofOnStellar({
@@ -176,12 +263,25 @@ export function useEvidence(): UseEvidenceReturn {
       setStage('registered')
       setMessage(`Registration submitted with Stellar status: ${result.status}.`)
     } catch (error) {
+      if (seq !== seqRef.current) return
+      if (isCancellationError(error) || abortRef.current?.signal.aborted) {
+        // Cancellation here can only interrupt Silent Witness proving, so the
+        // stable copy always says "Proof generation cancelled." regardless of
+        // whether the button handler or the async rejection writes it first.
+        setStage('cancelled')
+        setMessage(CANCELLED_MESSAGES.proving)
+        return
+      }
       setStage('error')
       setMessage(error instanceof Error ? error.message : 'Stellar registration failed.')
     }
   }
 
-  async function attachSilentWitnessProof(nextProof: ProofPackage): Promise<ProofPackage> {
+  async function attachSilentWitnessProof(
+    nextProof: ProofPackage,
+    seq: number,
+    signal?: AbortSignal,
+  ): Promise<ProofPackage> {
     if (!credentialSeed.trim() || !nullifierSeed.trim()) {
       throw new Error('Silent Witness requires your credential and nullifier seeds.')
     }
@@ -190,21 +290,65 @@ export function useEvidence(): UseEvidenceReturn {
     setMessage('Generating Noir UltraHonk proof in this browser.')
 
     const { fieldSecret } = await import('../utils')
+    throwIfAborted(signal)
     const [credentialSecret, nullifierSecret] = await Promise.all([
       fieldSecret('credential', credentialSeed.trim()),
       fieldSecret('nullifier', nullifierSeed.trim()),
     ])
+    throwIfAborted(signal)
 
-    const { generateSilentWitnessProof } = await import('../noirClient')
-    const silentWitness = await generateSilentWitnessProof({
-      videoHash: nextProof.videoHash,
-      credentialSecret,
-      nullifierSecret,
-    })
+    const silentWitness = await runProver(nextProof, credentialSecret, nullifierSecret)
+    if (seq !== seqRef.current) return nextProof
+    throwIfAborted(signal)
 
     const nextWithProof: ProofPackage = { ...nextProof, silentWitness }
     setProof(nextWithProof)
     return nextWithProof
+  }
+
+  /**
+   * Run Silent Witness proving in the cancellable module worker.
+   *
+   * The worker is the only proving surface: witnesses and credential/nullifier
+   * seeds must never execute on the UI thread. When the environment cannot
+   * satisfy the worker capability floor, `ProofWorkerClient.generate` rejects
+   * with `UNSUPPORTED_ENVIRONMENT` before any secret input is transferred.
+   */
+  async function runProver(
+    nextProof: ProofPackage,
+    credentialSecret: string,
+    nullifierSecret: string,
+  ): Promise<SilentWitnessProof> {
+    const { ProofWorkerClient, ProofWorkerError } = await import('../workers/proofWorkerClient')
+    const client = proofClientRef.current ?? new ProofWorkerClient()
+    proofClientRef.current = client
+    const { requestId, result } = client.generate({
+      videoHash: nextProof.videoHash,
+      credentialSecret,
+      nullifierSecret,
+    })
+    proofRequestIdRef.current = requestId
+    try {
+      const silentWitness = await result
+      proofRequestIdRef.current = null
+      return silentWitness
+    } catch (error) {
+      proofRequestIdRef.current = null
+      if (error instanceof ProofWorkerError && error.code === 'CANCELLED') {
+        throw new FlowCancelledError('Proof generation cancelled.')
+      }
+      throw error
+    }
+  }
+
+  function cancelEvidence() {
+    if (!isCancellable) return
+    // Capture the stage we are leaving so the message is accurate and stable;
+    // the flow then resets to a clean cancelled state.
+    const sourceStage = stageRef.current
+    resetFlow()
+    setStage('cancelled')
+    setMessage(CANCELLED_MESSAGES[sourceStage])
   }
 
   return {
@@ -222,7 +366,9 @@ export function useEvidence(): UseEvidenceReturn {
     message,
     registration,
     networkMismatch,
+    isCancellable,
     handleEvidence,
     registerProof,
+    cancelEvidence,
   }
 }

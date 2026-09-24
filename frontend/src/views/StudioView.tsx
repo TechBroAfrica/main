@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { BadgeCheck, CheckCircle2, Loader2, Upload } from 'lucide-react'
+import { BadgeCheck, CheckCircle2, Loader2, Upload, XCircle } from 'lucide-react'
 import type { UseEvidenceReturn } from '../hooks/useEvidence'
 import { TIERS } from '../hooks/useEvidence'
 import type { UseVerificationReturn } from '../hooks/useVerification'
@@ -38,8 +38,10 @@ export function StudioView({ wallet, evidence, verification, provenanceRecord }:
     message,
     registration,
     networkMismatch,
+    isCancellable,
     handleEvidence,
     registerProof,
+    cancelEvidence,
   } = evidence
 
   const { verifyHash, verifyResult, events, chainProof, verifyEvidence, loadEvents } = verification
@@ -123,6 +125,20 @@ export function StudioView({ wallet, evidence, verification, provenanceRecord }:
                 autoComplete="off"
               />
             </label>
+          </div>
+        ) : null}
+
+        {isCancellable ? (
+          <div className="verify-actions" role="group" aria-label="Evidence studio actions">
+            <button
+              type="button"
+              className="hero-secondary verify-action-btn"
+              onClick={cancelEvidence}
+              aria-label={stage === 'proving' ? 'Cancel proof generation' : 'Cancel upload'}
+            >
+              <XCircle size={14} aria-hidden="true" />
+              {stage === 'proving' ? 'Cancel proof' : 'Cancel upload'}
+            </button>
           </div>
         ) : null}
 
