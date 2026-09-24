@@ -159,6 +159,16 @@ Stellar private key. All on-chain operations are validated by the Soroban VM.
 queries via `psycopg`. `DATABASE_URL` is read from the environment and never
 logged. The NeonDB row schema does not store ZK secrets.
 
+**TB-4 Offline local verification (client → nothing):** When the Verification
+Portal runs "Offline local check", the browser performs the hash, stego
+extraction, structural validation, and file→metadata binding with zero network
+calls and no storage or log writes. This boundary produces **no trust
+decision**: a verifier must still consult the registry (TB-2) and event feed
+(TB-3) to confirm revocation, expiry, or nullifier replay, so offline success
+is reported only as a local check with chain/registry status "not checked".
+Envelopes carrying secret-shaped keys are rejected before any field is read,
+and output copy never carries file names, hashes, or secret material.
+
 ---
 
 ## 6. Threat Scenarios
@@ -622,6 +632,7 @@ must be reconciled against on-chain data for any security-sensitive decision.
 | Browser-side Noir proving — secrets never sent to server in production | T4, T5 | `noirClient.ts` → `generateSilentWitnessProof` |
 | **Worker-isolated proving** — Noir proving runs in a dedicated Web Worker which is explicitly terminated upon success, failure, timeout, or cancellation. This guarantees the browser reclaims the memory hardware-isolate and drops all secrets reliably, rather than depending on GC. | T4, T5 | `proveWorker.ts`, `noirClient.ts` |
 | Network passphrase guard (blocks wrong Stellar network) | T1 | `networkGuard.ts` → `checkNetworkMatch` |
+| Offline local verification — zero network calls, no storage/log writes, and never a confirmed trust decision; envelope extraction reuses the existing single stego loader (no second protocol truth) and secret-shaped envelopes are rejected up-front | T4, T5 | `offlineVerification.ts`, `useVerification.ts` |
 | Hex normalization and validation on all hash inputs | T1, T8 | `stellarEncoding.ts` → `asHex32`, `asHexBytes` |
 | `CONTRACT_NETWORK_PASSPHRASE` exported constant used by guard | T1 | `harpocratesRegistry.ts` |
 
@@ -827,6 +838,11 @@ The following are explicitly outside the scope of this threat model:
 - **Dependency vulnerability management** — routine CVE scanning and patching
   of npm and Python dependencies is a continuous operations concern, not
   addressed here.
+- **Validating Silent Witness proof bytes offline** — offline local verification
+  checks hash, envelope structure, and file binding only. Proof-byte validation
+  requires the UltraHonk verifier (contract or WASM with the matching circuit
+  artifact) and is intentionally not performed in offline mode; it is also not
+  embedded into the canonical metadata, so no second protocol truth is created.
 
 ---
 
