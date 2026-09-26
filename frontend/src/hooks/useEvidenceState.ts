@@ -4,39 +4,51 @@ import { CheckpointStorage } from '../checkpointStorage'
 
 export function useEvidenceState() {
   const machineRef = useRef<EvidenceStateMachine | null>(null)
-  if (!machineRef.current) {
-    machineRef.current = new EvidenceStateMachine()
-  }
-
-  const [state, setState] = useState<EvidenceState>(machineRef.current.getState())
-  const [hasCheckpoint, setHasCheckpoint] = useState(CheckpointStorage.hasCheckpoint())
+  const [state, setState] = useState<EvidenceState>({
+    stage: 'idle',
+    tier: 'silent',
+    updatedAt: 0,
+  })
+  const [hasCheckpoint, setHasCheckpoint] = useState(() => CheckpointStorage.hasCheckpoint())
 
   useEffect(() => {
-    const unsubscribe = machineRef.current!.subscribe((nextState) => {
+    if (!machineRef.current) {
+      machineRef.current = new EvidenceStateMachine()
+      setState(machineRef.current.getState())
+    }
+
+    const unsubscribe = machineRef.current.subscribe((nextState) => {
       setState(nextState)
     })
     return unsubscribe
   }, [])
 
   const send = useCallback((event: EvidenceEvent) => {
-    machineRef.current!.send(event)
+    if (!machineRef.current) {
+      machineRef.current = new EvidenceStateMachine()
+    }
+    machineRef.current.send(event)
   }, [])
 
   const setPassword = useCallback((password: string) => {
-    machineRef.current!.setPassword(password)
+    if (!machineRef.current) {
+      machineRef.current = new EvidenceStateMachine()
+    }
+    machineRef.current.setPassword(password)
   }, [])
 
   const loadCheckpoint = useCallback(async (password: string) => {
     try {
       const stored = await CheckpointStorage.load(password)
       if (stored) {
-        machineRef.current = new EvidenceStateMachine(stored, password)
-        setState(machineRef.current.getState())
+        const nextMachine = new EvidenceStateMachine(stored, password)
+        machineRef.current = nextMachine
+        setState(nextMachine.getState())
         setHasCheckpoint(false) // Loaded, no longer just "has" it
         return true
       }
-    } catch (e) {
-      console.error(e)
+    } catch (error) {
+      console.error(error)
     }
     return false
   }, [])

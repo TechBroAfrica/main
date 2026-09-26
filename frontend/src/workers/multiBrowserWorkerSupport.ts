@@ -90,6 +90,24 @@ function hasConstructor(globalObj: typeof globalThis, name: string): boolean {
 }
 
 /**
+ * `WebAssembly` is a namespace object, not a constructor, so the
+ * `typeof === 'function'` probe used for Worker/ArrayBuffer always reports it
+ * as missing. Check the namespace plus the entry points the Barretenberg
+ * proof worker actually calls.
+ */
+function hasWebAssembly(globalObj: typeof globalThis): boolean {
+  const namespace = (globalObj as Record<string, unknown>).WebAssembly as
+    | { instantiate?: unknown; compile?: unknown }
+    | undefined
+  return Boolean(
+    namespace &&
+      typeof namespace === 'object' &&
+      typeof namespace.instantiate === 'function' &&
+      typeof namespace.compile === 'function',
+  )
+}
+
+/**
  * Probe the runtime for proof-worker prerequisites.
  * Never inspects user input, media, or secrets.
  */
@@ -103,7 +121,7 @@ export function detectWorkerCapabilities(
     // construct one during a sync probe, so we require Worker + documented
     // matrix capability "module Web Workers".
     moduleWorkerType: hasConstructor(globalObj, 'Worker'),
-    WebAssembly: hasConstructor(globalObj, 'WebAssembly'),
+    WebAssembly: hasWebAssembly(globalObj),
     SubtleCrypto: Boolean(cryptoObj && typeof cryptoObj.subtle === 'object' && cryptoObj.subtle !== null),
     BigInt: typeof (globalObj as { BigInt?: unknown }).BigInt === 'function',
     ArrayBuffer: hasConstructor(globalObj, 'ArrayBuffer'),

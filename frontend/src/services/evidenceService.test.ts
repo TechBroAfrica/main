@@ -28,8 +28,7 @@ async function makeEmbedFetchMock(overrides: {
   const blob = makeMockBlob('embedded-video-bytes')
   // We need the real hash of the blob to pass the integrity check.
   const { hex } = await import('../utils')
-  const realHash = hex(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))
-  const embeddedHash = overrides.embeddedHashOverride ?? realHash
+  const embeddedHash = overrides.embeddedHashOverride ?? hex(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))
   const metadataHash = overrides.missingHeader ? null : 'a'.repeat(64)
 
   return vi.fn().mockResolvedValueOnce({
@@ -76,8 +75,7 @@ describe('embedVideo', () => {
 
   it('surfaces the API error message on non-OK responses with a JSON body', async () => {
     const blob = makeMockBlob('embedded-video-bytes')
-    const { hex } = await import('../utils')
-    const realHash = hex(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))
+    void blob
 
     vi.stubGlobal(
       'fetch',

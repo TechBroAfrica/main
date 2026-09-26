@@ -42,6 +42,22 @@ function browserStorage(name: StorageName): Storage {
 
 function createSafeStorage(name: StorageName) {
   return {
+    setItem(key: string, value: string) {
+      browserStorage(name).setItem(key, value)
+    },
+
+    getItem(key: string): string | null {
+      return browserStorage(name).getItem(key)
+    },
+
+    removeItem(key: string) {
+      browserStorage(name).removeItem(key)
+    },
+
+    clear() {
+      browserStorage(name).clear()
+    },
+
     setUiPreferences(value: PersistedUiPreferences) {
       const safe = sanitizePreferences(value)
       browserStorage(name).setItem(STORAGE_KEY, JSON.stringify(safe))

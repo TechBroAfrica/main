@@ -1,4 +1,4 @@
-import { Barretenberg, UltraHonkBackend } from '@aztec/bb.js'
+import { Barretenberg, Fr, UltraHonkBackend } from '@aztec/bb.js'
 import { Noir } from '@noir-lang/noir_js'
 import type { CompiledCircuit } from '@noir-lang/types'
 import type {
@@ -8,6 +8,9 @@ import type {
 } from './types/schema'
 import { SCHEMA_CONSTANTS } from './types/schema'
 import { encodePublicInputs } from './verifierInputs'
+
+/** Noir's `std::hash::pedersen_hash` corresponds to Barretenberg Pedersen index 0. */
+const PEDERSEN_HASH_INDEX = 0
 
 let circuitPromise: Promise<CompiledCircuit> | null = null
 let bbPromise: Promise<Barretenberg> | null = null
@@ -19,8 +22,11 @@ async function getBB(): Promise<Barretenberg> {
 
 async function pedersenHash(inputs: bigint[]): Promise<bigint> {
   const bb = await getBB()
-  const result = await bb.pedersenHash(inputs)
-  return result
+  const result = await bb.pedersenHash(
+    inputs.map((value) => new Fr(value)),
+    PEDERSEN_HASH_INDEX,
+  )
+  return BigInt(`0x${bytesToHex(result.toBuffer())}`)
 }
 
 function padPredicates(predicates: Predicate[]): Predicate[] {

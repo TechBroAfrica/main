@@ -1,3 +1,6 @@
+import { UltraHonkBackend } from '@aztec/bb.js'
+import { Noir } from '@noir-lang/noir_js'
+import type { CompiledCircuit } from '@noir-lang/types'
 import { encodeFieldToBytes32Hex, encodePublicInputs } from './verifierInputs'
 
 type SilentWitnessProof = {
@@ -7,20 +10,6 @@ type SilentWitnessProof = {
   domainTag: string
   proof: string
   /** Hex-encoded public inputs: 5 × 32 bytes = 160 bytes (320 hex chars). */
-  publicInputs: string
-  proofBytes: number
-  publicInputBytes: number
-}
-
-type AggregatedProof = {
-  protocol: string
-  version: number
-  type: string
-  batchId: string
-  batchSize: number
-  maxBatchSize: number
-  videoHashes: string[]
-  proof: string
   publicInputs: string
   proofBytes: number
   publicInputBytes: number
@@ -36,16 +25,8 @@ type GenerateSilentWitnessInput = {
   epoch?: number
 }
 
-type GenerateAggregatedProofInput = {
-  videoHashes: string[]
-  credentialSecret: string
-  nullifierSecret: string
-}
-
 let helperCircuitPromise: Promise<CompiledCircuit> | null = null
 let mainCircuitPromise: Promise<CompiledCircuit> | null = null
-let aggregatorCircuitPromise: Promise<CompiledCircuit> | null = null
-let aggregatorHelperCircuitPromise: Promise<CompiledCircuit> | null = null
 
 /**
  * Generate a Silent Witness Noir/UltraHonk proof.
@@ -124,8 +105,24 @@ export async function generateSilentWitnessProof({
   }
 }
 
-async function sha256(input: string): Promise<string> {
-  const bytes = new TextEncoder().encode(input)
-  const hash = await crypto.subtle.digest('SHA-256', bytes)
-  return bytesToHex(new Uint8Array(hash))
+async function loadHelperCircuit() {
+  helperCircuitPromise ??= loadCircuit('/noir/silent_witness_helper.json')
+  return helperCircuitPromise
+}
+
+async function loadMainCircuit() {
+  mainCircuitPromise ??= loadCircuit('/noir/silent_witness.json')
+  return mainCircuitPromise
+}
+
+async function loadCircuit(path: string) {
+  const response = await fetch(path)
+  if (!response.ok) {
+    throw new Error(`Unable to load Noir circuit artifact: ${path}`)
+  }
+  return (await response.json()) as CompiledCircuit
+}
+
+function bytesToHex(bytes: Uint8Array) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }

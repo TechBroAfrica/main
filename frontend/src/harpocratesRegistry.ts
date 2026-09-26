@@ -4,6 +4,7 @@ import {
   Contract,
   Networks,
   TransactionBuilder,
+  nativeToScVal,
   scValToNative,
 } from '@stellar/stellar-sdk'
 import { rpc } from '@stellar/stellar-sdk'
@@ -16,9 +17,9 @@ import {
   scBytes32,
   scU32,
 } from './stellarEncoding'
+import { assertReleaseCompatibility } from './releaseCompatibility'
 import type {
   ChainProofRecord,
-  ChainVerifierState,
   IdentityTier,
   NormalizedRegisterProofInput,
   ProofHistoryEntry,
@@ -209,14 +210,15 @@ export async function getBatchProofStatuses(
   const server = new rpc.Server(RPC_URL)
   const account = await server.getAccount(source)
   const contract = new Contract(contractId)
-  
-  const scProofIds = proofIds.map(id => scBytes32(asHex32(id, 'proofId')))
-  
+
+  const scProofIds = proofIds.map((id) => scBytes32(asHex32(id, 'proofId')))
+  const scProofIdVec = nativeToScVal(scProofIds, { type: { vec: 'BytesN<32>' } })
+
   const transaction = new TransactionBuilder(account, {
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
   })
-    .addOperation(contract.call('get_proof_statuses' as any, scProofIds))
+    .addOperation(contract.call('get_proof_statuses' satisfies RegistryMethod, scProofIdVec))
     .setTimeout(30)
     .build()
 
@@ -232,7 +234,7 @@ export async function getBatchProofStatuses(
   if (!native || !Array.isArray(native)) return null
 
   // returns array of status enum values mapped to numbers
-  return native.map((val: any) => Number(val))
+  return native.map((val: unknown) => Number(val ?? 0))
 }
 
 function normalizeRegisterProofInput(input: RegisterProofInput): NormalizedRegisterProofInput {

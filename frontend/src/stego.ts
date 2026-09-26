@@ -1,9 +1,10 @@
-import pako from 'pako'
+import { inflate } from 'pako'
 
 const MAGIC = new TextEncoder().encode('HRPSTG1')
 const MAX_PAYLOAD_BYTES = 64 * 1024
 const BORDER_BLOCK = 6
 const BORDER_STRIDE = 2
+const EXTRACTION_TIMEOUT_MS = 15_000
 
 export class MalformedEvidenceError extends Error {
   constructor() {
@@ -13,7 +14,9 @@ export class MalformedEvidenceError extends Error {
 }
 
 async function sha256(data: Uint8Array): Promise<Uint8Array> {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  // Copy into a fresh ArrayBuffer-backed view: SubtleCrypto rejects views that
+  // may be backed by a SharedArrayBuffer under the BufferSource typing.
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new Uint8Array(data))
   return new Uint8Array(hashBuffer)
 }
 
@@ -60,7 +63,7 @@ async function unpackPayload(data: Uint8Array): Promise<unknown | null> {
   if (!bytesEqual(checksum, actualChecksum)) return null
 
   try {
-    const decompressed = pako.inflate(body)
+    const decompressed = inflate(body)
     const jsonStr = new TextDecoder('utf-8').decode(decompressed)
     const value = JSON.parse(jsonStr)
     return typeof value === 'object' && value !== null ? value : null
@@ -112,6 +115,19 @@ export async function extractMetadata(file: File): Promise<unknown> {
     video.muted = true
     video.playsInline = true
 
+    // A browser that loads metadata but never yields a frame emits neither
+    // `ended` nor `error`, and a throw inside the frame loop rejects nothing.
+    // Either way this promise would stay pending forever and hang the caller,
+    // so bound the attempt and report it as malformed evidence.
+    const settle = (fn: () => void) => {
+      clearTimeout(watchdog)
+      URL.revokeObjectURL(video.src)
+      fn()
+    }
+    const watchdog = setTimeout(() => {
+      settle(() => reject(new MalformedEvidenceError()))
+    }, EXTRACTION_TIMEOUT_MS)
+
     video.onloadedmetadata = () => {
       const width = video.videoWidth
       const height = video.videoHeight
@@ -121,8 +137,7 @@ export async function extractMetadata(file: File): Promise<unknown> {
       const ctx = canvas.getContext('2d', { willReadFrequently: true })
 
       if (!ctx) {
-        URL.revokeObjectURL(video.src)
-        reject(new MalformedEvidenceError())
+        settle(() => reject(new MalformedEvidenceError()))
         return
       }
 
@@ -160,8 +175,7 @@ export async function extractMetadata(file: File): Promise<unknown> {
         if (res !== null) {
           isDone = true
           video.pause()
-          URL.revokeObjectURL(video.src)
-          resolve(res)
+          settle(() => resolve(res))
           return
         }
 
@@ -169,12 +183,14 @@ export async function extractMetadata(file: File): Promise<unknown> {
         if (frameCount > 240 || video.ended || video.paused) {
           if (!isDone) {
             isDone = true
-            URL.revokeObjectURL(video.src)
-            reject(new MalformedEvidenceError())
+            settle(() => reject(new MalformedEvidenceError()))
           }
         } else {
           if ('requestVideoFrameCallback' in video) {
-            ;(video as any).requestVideoFrameCallback(processFrame)
+            const videoWithFrameCallback = video as HTMLVideoElement & {
+              requestVideoFrameCallback: (callback: FrameRequestCallback) => number
+            }
+            videoWithFrameCallback.requestVideoFrameCallback(processFrame)
           } else {
             requestAnimationFrame(processFrame)
           }
@@ -185,28 +201,28 @@ export async function extractMetadata(file: File): Promise<unknown> {
         .play()
         .then(() => {
           if ('requestVideoFrameCallback' in video) {
-            ;(video as any).requestVideoFrameCallback(processFrame)
+            const videoWithFrameCallback = video as HTMLVideoElement & {
+              requestVideoFrameCallback: (callback: FrameRequestCallback) => number
+            }
+            videoWithFrameCallback.requestVideoFrameCallback(processFrame)
           } else {
             requestAnimationFrame(processFrame)
           }
         })
         .catch(() => {
-          URL.revokeObjectURL(video.src)
-          reject(new MalformedEvidenceError())
+          settle(() => reject(new MalformedEvidenceError()))
         })
 
       video.onended = () => {
         if (!isDone) {
           isDone = true
-          URL.revokeObjectURL(video.src)
-          reject(new MalformedEvidenceError())
+          settle(() => reject(new MalformedEvidenceError()))
         }
       }
     }
 
     video.onerror = () => {
-      URL.revokeObjectURL(video.src)
-      reject(new MalformedEvidenceError())
+      settle(() => reject(new MalformedEvidenceError()))
     }
   })
 }

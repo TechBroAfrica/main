@@ -92,7 +92,10 @@ const CODE_GUIDANCE: Record<Exclude<BackendErrorCode, 'UNKNOWN'>, CodeGuidance> 
 }
 
 function stripHtml(input: string): string {
-  return input.replace(/<[^>]*>/g, '')
+  // Drop script/style blocks *including their bodies*: that content is code,
+  // not user-facing copy, and can carry stack traces or leaked values.
+  const withoutBlocks = input.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+  return withoutBlocks.replace(/<[^>]*>/g, '')
 }
 
 function truncate(input: string): string {
@@ -120,17 +123,26 @@ function codeFromStatus(status: number): BackendErrorCode {
 function buildActionableMessage(code: BackendErrorCode, detail: string | null): string {
   if (code !== 'UNKNOWN') {
     const guidance = CODE_GUIDANCE[code]
-    // Prefer backend detail when it already sounds actionable; otherwise use guidance.
-    if (detail && detail.length >= 12) {
-      // Ensure size/type codes always include a concrete next step.
-      if (code === 'PAYLOAD_TOO_LARGE' && !/smaller|size|large|limit|MB|bytes/i.test(detail)) {
-        return sanitizeText(`${detail} Choose a smaller video and try again.`)
+    // Prefer the backend detail whenever one was provided, so the caller sees
+    // what the server actually said. For codes that need a concrete next step,
+    // append it when the detail doesn't already carry one. VALIDATION_ERROR and
+    // NOT_FOUND have no mandated next step, so their detail is returned as-is
+    // instead of being discarded for being terse.
+    if (detail) {
+      if (code === 'PAYLOAD_TOO_LARGE') {
+        return /smaller|size|large|limit|MB|bytes/i.test(detail)
+          ? detail
+          : sanitizeText(`${detail} Choose a smaller video and try again.`)
       }
-      if (code === 'UNSUPPORTED_MEDIA_TYPE' && !/MP4|WebM|MOV|supported|type/i.test(detail)) {
-        return sanitizeText(`${detail} Use an MP4, WebM, or MOV video.`)
+      if (code === 'UNSUPPORTED_MEDIA_TYPE') {
+        return /MP4|WebM|MOV|supported/i.test(detail)
+          ? detail
+          : sanitizeText(`${detail} Use an MP4, WebM, or MOV video.`)
       }
-      if (code === 'INTERNAL_ERROR' && !/retry|try again|moment/i.test(detail)) {
-        return sanitizeText(`${detail} Retry in a moment.`)
+      if (code === 'INTERNAL_ERROR') {
+        return /retry|try again|moment/i.test(detail)
+          ? detail
+          : sanitizeText(`${detail} Retry in a moment.`)
       }
       return detail
     }

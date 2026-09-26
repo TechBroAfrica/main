@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { EvidenceStateData } from '../checkpointStorage'
 
 /** Strip values that could leak private evidence data from live-region text. */
 function sanitizeAnnouncement(raw: string): string {
@@ -31,7 +32,8 @@ export function useLiveRegion() {
   return { message, announce }
 }
 
-export type Stage = 'idle' | 'hashing' | 'embedding' | 'proving' | 'ready' | 'registered' | 'error'
+/** Single source of truth: the evidence stage union owned by the state machine. */
+export type Stage = EvidenceStateData['stage']
 
 const STAGE_LABELS: Record<Stage, string> = {
   idle: 'Ready',
@@ -39,12 +41,14 @@ const STAGE_LABELS: Record<Stage, string> = {
   embedding: 'Embedding metadata\u2026',
   proving: 'Generating proof\u2026',
   ready: 'Evidence package ready',
+  registering: 'Submitting registration…',
   registered: 'Registration submitted',
   error: 'An error occurred',
 }
 
 export function useA11yStage(stage: Stage) {
-  const isBusy = stage === 'hashing' || stage === 'embedding' || stage === 'proving'
+  const isBusy =
+    stage === 'hashing' || stage === 'embedding' || stage === 'proving' || stage === 'registering'
   const statusLabel = STAGE_LABELS[stage]
   return { statusLabel, isBusy }
 }

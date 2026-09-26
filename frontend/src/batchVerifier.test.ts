@@ -6,6 +6,32 @@ import {
   type BatchConfig,
 } from './batchVerifier'
 
+// Stego extraction decodes pixels from a real <video> element, which jsdom cannot
+// drive (it never fires loadedmetadata/error for a blob URL). These tests cover
+// batch orchestration only, so extraction is stubbed the same way
+// verificationFlow.test.ts stubs it.
+const { extractMetadata } = vi.hoisted(() => ({ extractMetadata: vi.fn() }))
+
+vi.mock('./stego', () => ({
+  extractMetadata,
+  MalformedEvidenceError: class MalformedEvidenceError extends Error {
+    constructor() {
+      super('Malformed evidence')
+      this.name = 'MalformedEvidenceError'
+    }
+  },
+}))
+
+function stubChainLookup(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ events: [] }),
+    }),
+  )
+}
+
 describe('batchVerifier', () => {
   describe('computeChunkedSha256', () => {
     it('computes sha256 for small files', async () => {
@@ -67,6 +93,8 @@ describe('batchVerifier', () => {
         maxTotalSizeBytes: 1000,
       }
       const verifier = new BatchVerifier(config)
+      extractMetadata.mockResolvedValue({ protocol: 'harpocrates' })
+      stubChainLookup()
 
       const fileNormal = new File(['short'], 'ok.mp4', { type: 'video/mp4' })
       const fileOversized = new File(['a'.repeat(200)], 'large.mp4', { type: 'video/mp4' })
@@ -76,6 +104,8 @@ describe('batchVerifier', () => {
       const oversizedItem = items.find((i) => i.fileName === 'large.mp4')
       expect(oversizedItem?.status).toBe('oversized')
       expect(oversizedItem?.message).toContain('exceeds size limit')
+
+      vi.unstubAllGlobals()
     })
 
     it('enforces max total batch size limit', async () => {
@@ -84,15 +114,20 @@ describe('batchVerifier', () => {
         maxTotalSizeBytes: 250, // total 250 bytes max
       }
       const verifier = new BatchVerifier(config)
+      extractMetadata.mockResolvedValue({ protocol: 'harpocrates' })
+      stubChainLookup()
 
       const f1 = new File(['a'.repeat(150)], 'f1.mp4')
-      const f2 = new File(['b'.repeat(150)], 'f2.mp4')
+      const f2 = new File(['a'.repeat(150)], 'f2.mp4')
 
       const { items } = await verifier.runBatch([f1, f2])
       const f2Item = items.find((i) => i.fileName === 'f2.mp4')
       expect(f2Item?.status).toBe('oversized')
       expect(f2Item?.message).toContain('Total batch size limit exceeded')
+
+      vi.unstubAllGlobals()
     })
+
 
     it('detects duplicate files in batch', async () => {
       const verifier = new BatchVerifier({
@@ -100,16 +135,12 @@ describe('batchVerifier', () => {
         apiBase: 'http://127.0.0.1:5050',
       })
 
-      // Mock global fetch for stego extract
+      extractMetadata.mockResolvedValue({ protocol: 'harpocrates' })
+
+      // Mock global fetch for the on-chain lookup that follows extraction
       vi.stubGlobal(
         'fetch',
         vi.fn().mockImplementation((url: string) => {
-          if (url.includes('/api/stego/extract')) {
-            return Promise.resolve({
-              ok: true,
-              json: () => Promise.resolve({ metadata: { protocol: 'harpocrates' } }),
-            })
-          }
           if (url.includes('/api/proofs/by-video/')) {
             return Promise.resolve({
               ok: true,
@@ -136,16 +167,19 @@ describe('batchVerifier', () => {
     it('isolates single file failures without failing entire batch', async () => {
       const verifier = new BatchVerifier({ maxConcurrency: 2 })
 
+      const { MalformedEvidenceError } = await import('./stego')
+      // The corrupt artifact has no readable embedded metadata, which is what
+      // surfaces to the batch item as a 'malformed' outcome.
+      extractMetadata.mockImplementation(async (file: File) => {
+        if (file.name === 'bad.mp4') {
+          throw new MalformedEvidenceError()
+        }
+        return { protocol: 'harpocrates' }
+      })
+
       vi.stubGlobal(
         'fetch',
         vi.fn().mockImplementation((url: string) => {
-          if (url.includes('/api/stego/extract')) {
-            // Cause error for corrupted file
-            return Promise.resolve({
-              ok: false,
-              status: 400,
-            })
-          }
           if (url.includes('/api/proofs/by-video/')) {
             return Promise.resolve({
               ok: true,

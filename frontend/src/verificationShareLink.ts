@@ -117,9 +117,12 @@ export function createVerificationSharePayload(
     payload.transactionRef = tx
   }
 
-  if (input.tier !== undefined && input.tier !== null && input.tier !== '') {
-    if (!isTier(input.tier)) return fail('INVALID_FIELD')
-    payload.tier = input.tier
+  // Callers may hand us unvalidated runtime data, so narrow via `unknown`
+  // before the isTier guard rather than trusting the declared type.
+  const rawTier: unknown = input.tier
+  if (rawTier !== undefined && rawTier !== null && rawTier !== '') {
+    if (!isTier(rawTier)) return fail('INVALID_FIELD')
+    payload.tier = rawTier
   }
 
   const bytes = utf8(canonicalize(payload)).byteLength
@@ -228,16 +231,13 @@ export function parseVerificationShareLink(urlOrHash: string): ShareLinkParseRes
   }
 
   const query = qIndex >= 0 ? hash.slice(qIndex + 1) : ''
-  let encoded: string | null = null
   try {
-    const params = new URLSearchParams(query)
-    encoded = params.get('p')
+    const encoded = new URLSearchParams(query).get('p')
+    if (!encoded) return fail('MISSING_PAYLOAD')
+    return decodeVerificationSharePayload(encoded)
   } catch {
     return fail('MALFORMED_URL')
   }
-
-  if (!encoded) return fail('MISSING_PAYLOAD')
-  return decodeVerificationSharePayload(encoded)
 }
 
 export function shareLinkErrorMessage(code: ShareLinkErrorCode): string {
