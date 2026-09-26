@@ -110,9 +110,11 @@ export function useEvidence(): UseEvidenceReturn {
   }, [stage])
 
   useEffect(() => {
+    const abortController = abortRef.current
+    const provingAbortController = proveAbortRef.current
     return () => {
-      abortRef.current?.abort()
-      proveAbortRef.current?.abort()
+      abortController?.abort()
+      provingAbortController?.abort()
       proofClientRef.current?.destroy()
       proofClientRef.current = null
     }

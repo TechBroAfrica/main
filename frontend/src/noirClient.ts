@@ -16,7 +16,7 @@ type SilentWitnessProof = {
   publicInputBytes: number
 }
 
-type AggregatedProof = {
+export type AggregatedProof = {
   protocol: string
   version: number
   type: string
@@ -40,7 +40,7 @@ type GenerateSilentWitnessInput = {
   epoch?: number
 }
 
-type GenerateAggregatedProofInput = {
+export type GenerateAggregatedProofInput = {
   videoHashes: string[]
   credentialSecret: string
   nullifierSecret: string
@@ -138,7 +138,7 @@ export async function generateSilentWitnessProof({
   }
 }
 
-async function sha256(input: string): Promise<string> {
+export async function sha256(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input)
   const hash = await crypto.subtle.digest('SHA-256', bytes)
   return bytesToHex(new Uint8Array(hash))
