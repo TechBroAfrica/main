@@ -100,9 +100,10 @@ export function useEvidence(): UseEvidenceReturn {
   // a newer flow or a reset caused by cancellation.
   const seqRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
-  const proofClientRef = useRef<import('../workers/proofWorkerClient').ProofWorkerClient | null>(null)
+  const proofClientRef = useRef<ProofWorkerClient | null>(null)
   const proofRequestIdRef = useRef<string | null>(null)
   const stageRef = useRef<Stage>('idle')
+  const proveAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     stageRef.current = stage
@@ -111,16 +112,7 @@ export function useEvidence(): UseEvidenceReturn {
   useEffect(() => {
     return () => {
       abortRef.current?.abort()
-      proofClientRef.current?.destroy()
-  const proofClientRef = useRef<ProofWorkerClient | null>(null)
-  const activeRequestIdRef = useRef<string | null>(null)
-  const proveAbortRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    return () => {
       proveAbortRef.current?.abort()
-      proveAbortRef.current = null
-      activeRequestIdRef.current = null
       proofClientRef.current?.destroy()
       proofClientRef.current = null
     }
@@ -137,18 +129,19 @@ export function useEvidence(): UseEvidenceReturn {
     abortRef.current?.abort()
     abortRef.current = null
     seqRef.current += 1
-    const client = proofClientRef.current
-    if (client && proofRequestIdRef.current) {
-      client.cancel(proofRequestIdRef.current)
+    if (proofRequestIdRef.current && proofClientRef.current) {
+      proofClientRef.current.cancel(proofRequestIdRef.current)
     }
     proofRequestIdRef.current = null
-    client?.destroy()
+    proofClientRef.current?.destroy()
     proofClientRef.current = null
     if (processedVideoUrl) URL.revokeObjectURL(processedVideoUrl)
     setProcessedVideoUrl('')
     setProof(null)
     setFile(null)
     setRegistration(null)
+  }
+
   function getProofClient(): ProofWorkerClient {
     if (!proofClientRef.current) {
       proofClientRef.current = new ProofWorkerClient()
@@ -157,11 +150,12 @@ export function useEvidence(): UseEvidenceReturn {
   }
 
   function cancelProving() {
-    const requestId = activeRequestIdRef.current
+    const requestId = proofRequestIdRef.current
     proveAbortRef.current?.abort()
     if (requestId && proofClientRef.current) {
       proofClientRef.current.cancel(requestId)
     }
+    proofRequestIdRef.current = null
   }
 
   async function handleEvidence(nextFile: File | null) {
@@ -221,9 +215,6 @@ export function useEvidence(): UseEvidenceReturn {
     } catch (error) {
       if (seq !== seqRef.current) return
       if (isCancellationError(error) || signal.aborted) {
-        // The upload itself is the cancellable work here, so the copy matches
-        // the Cancel button even when the async rejection lands after the
-        // button handler already wrote the cancelled message.
         setStage('cancelled')
         setMessage(CANCELLED_MESSAGES.embedding)
         return
@@ -246,7 +237,6 @@ export function useEvidence(): UseEvidenceReturn {
       return
     }
 
-    // Re-check network immediately before submission.
     try {
       const { getWalletNetwork, CONTRACT_NETWORK_PASSPHRASE } = await import('../stellar')
       const { checkNetworkMatch } = await import('../networkGuard')
@@ -298,18 +288,16 @@ export function useEvidence(): UseEvidenceReturn {
     } catch (error) {
       if (seq !== seqRef.current) return
       if (isCancellationError(error) || abortRef.current?.signal.aborted) {
-        // Cancellation here can only interrupt Silent Witness proving, so the
-        // stable copy always says "Proof generation cancelled." regardless of
-        // whether the button handler or the async rejection writes it first.
         setStage('cancelled')
         setMessage(CANCELLED_MESSAGES.proving)
+        return
+      }
       if (error instanceof ProofWorkerError && error.code === 'CANCELLED') {
         setStage('ready')
         setMessage('Proof generation cancelled. Witness buffers were discarded; you can register again when ready.')
         return
       }
       setStage('error')
-      // Privacy: never surface raw worker payloads that might echo inputs.
       const safeMessage =
         error instanceof ProofWorkerError
           ? error.message
@@ -349,22 +337,12 @@ export function useEvidence(): UseEvidenceReturn {
     return nextWithProof
   }
 
-  /**
-   * Run Silent Witness proving in the cancellable module worker.
-   *
-   * The worker is the only proving surface: witnesses and credential/nullifier
-   * seeds must never execute on the UI thread. When the environment cannot
-   * satisfy the worker capability floor, `ProofWorkerClient.generate` rejects
-   * with `UNSUPPORTED_ENVIRONMENT` before any secret input is transferred.
-   */
   async function runProver(
     nextProof: ProofPackage,
     credentialSecret: string,
     nullifierSecret: string,
   ): Promise<SilentWitnessProof> {
-    const { ProofWorkerClient, ProofWorkerError } = await import('../workers/proofWorkerClient')
-    const client = proofClientRef.current ?? new ProofWorkerClient()
-    proofClientRef.current = client
+    const client = getProofClient()
     const { requestId, result } = client.generate({
       videoHash: nextProof.videoHash,
       credentialSecret,
@@ -386,42 +364,12 @@ export function useEvidence(): UseEvidenceReturn {
 
   function cancelEvidence() {
     if (!isCancellable) return
-    // Capture the stage we are leaving so the message is accurate and stable;
-    // the flow then resets to a clean cancelled state.
+
     const sourceStage = stageRef.current
+    proveAbortRef.current?.abort()
     resetFlow()
     setStage('cancelled')
     setMessage(CANCELLED_MESSAGES[sourceStage])
-    const client = getProofClient()
-    const abort = new AbortController()
-    proveAbortRef.current = abort
-
-    const { requestId, result } = client.generate(
-      {
-        videoHash: nextProof.videoHash,
-        credentialSecret,
-        nullifierSecret,
-      },
-      (stageName) => {
-        setMessage(`Generating proof (${stageName.replace(/_/g, ' ')})…`)
-      },
-      abort.signal,
-    )
-    activeRequestIdRef.current = requestId
-
-    try {
-      const silentWitness = await result
-      const nextWithProof: ProofPackage = { ...nextProof, silentWitness }
-      setProof(nextWithProof)
-      return nextWithProof
-    } finally {
-      if (activeRequestIdRef.current === requestId) {
-        activeRequestIdRef.current = null
-      }
-      if (proveAbortRef.current === abort) {
-        proveAbortRef.current = null
-      }
-    }
   }
 
   return {
