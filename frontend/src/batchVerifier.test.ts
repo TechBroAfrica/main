@@ -11,6 +11,7 @@ import {
 // batch orchestration only, so extraction is stubbed the same way
 // verificationFlow.test.ts stubs it.
 const { extractMetadata } = vi.hoisted(() => ({ extractMetadata: vi.fn() }))
+const { verifyArtifact } = vi.hoisted(() => ({ verifyArtifact: vi.fn() }))
 
 vi.mock('./stego', () => ({
   extractMetadata,
@@ -20,6 +21,10 @@ vi.mock('./stego', () => ({
       this.name = 'MalformedEvidenceError'
     }
   },
+}))
+
+vi.mock('./verificationFlow', () => ({
+  verifyArtifact,
 }))
 
 function stubChainLookup(): void {
@@ -175,6 +180,24 @@ describe('batchVerifier', () => {
           throw new MalformedEvidenceError()
         }
         return { protocol: 'harpocrates' }
+      })
+
+      vi.mocked(verifyArtifact).mockImplementation(async ({ file }) => {
+        if (file.name === 'bad.mp4') {
+          return {
+            outcome: 'malformed',
+            message: 'Malformed evidence: embedded metadata could not be parsed. Do not treat this artifact as verified.',
+            events: [],
+            chainProof: null,
+          }
+        }
+
+        return {
+          outcome: 'metadata-only',
+          message: 'Metadata only: embedded Harpocrates metadata lacks complete database and chain confirmation. Treat this artifact as unconfirmed.',
+          events: [],
+          chainProof: null,
+        }
       })
 
       vi.stubGlobal(
