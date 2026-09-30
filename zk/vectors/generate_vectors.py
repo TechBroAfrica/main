@@ -576,10 +576,10 @@ def build_cases() -> list[dict[str, object]]:
         )
     )
 
-    # ---- domain binding: domain all-ones --------------------------------
+    # ---- domain binding: domain mismatch --------------------------------
     cases.append(
         case(
-            "rv-neg-044-domain-all-ones",
+            "rv-neg-044-domain-mismatch",
             "revocation_witness/v1",
             "All-ones domain separator is non-canonical (canonical check precedes domain match).",
             revocation(REVOCATION_ROOT, NULLIFIER, ONES, CREDENTIAL_ROOT),
