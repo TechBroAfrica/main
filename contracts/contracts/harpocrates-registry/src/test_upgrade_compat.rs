@@ -75,7 +75,7 @@ fn upgrade_compat_init_stamps_v1() {
 }
 
 #[test]
-fn upgrade_compat_idempotent_noop_at_v1() {
+fn upgrade_compat_idempotent_noop_at_v2() {
     let (env, contract_id, admin) = init_registry();
     let client = HarpocratesRegistryClient::new(&env, &contract_id);
 
@@ -121,7 +121,7 @@ fn upgrade_compat_stamps_legacy_missing_schema_version() {
     // Getter remains compatible (treats missing as V1).
     assert_eq!(
         client.get_storage_schema_version(),
-        SchemaVersion::V1 as u32
+        SchemaVersion::V2 as u32
     );
 
     let before = schema_upgrade_event_count(&env, &contract_id);
@@ -136,11 +136,11 @@ fn upgrade_compat_stamps_legacy_missing_schema_version() {
     );
     assert_eq!(
         client.get_storage_schema_version(),
-        SchemaVersion::V1 as u32
+        SchemaVersion::V2 as u32
     );
     assert_eq!(
-        after, before,
-        "legacy stamp must not emit SchemaUpgraded (no layout migration)"
+        after, before + 1,
+        "legacy stamp must emit SchemaUpgraded due to V2 migration"
     );
 }
 
@@ -177,7 +177,7 @@ fn upgrade_compat_preserves_registered_source_proof() {
     );
     assert_eq!(
         client.get_storage_schema_version(),
-        SchemaVersion::V1 as u32
+        SchemaVersion::V2 as u32
     );
 }
 
@@ -197,7 +197,7 @@ fn upgrade_compat_preserves_verifier_boundary() {
     );
     assert_eq!(
         client.get_storage_schema_version(),
-        SchemaVersion::V1 as u32
+        SchemaVersion::V2 as u32
     );
 }
 
@@ -218,6 +218,6 @@ fn upgrade_compat_repeated_legacy_stamp_stays_idempotent() {
     assert_eq!(end, mid);
     assert_eq!(
         client.get_storage_schema_version(),
-        SchemaVersion::V1 as u32
+        SchemaVersion::V2 as u32
     );
 }

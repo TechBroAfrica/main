@@ -374,7 +374,7 @@ fn invariant_nullifier_replay_storage_unchanged() {
     assert!(result.is_err() || result.unwrap().is_err());
 
     // The nullifier flag is still present
-    assert!(client.has_nullifier(&nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier));
     // The new proof_id must not have been written
     assert!(client.get_proof(&b32(&env, 0x98)).is_none());
     // Original record intact (verify via video lookup)

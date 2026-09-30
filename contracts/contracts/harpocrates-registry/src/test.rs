@@ -112,7 +112,7 @@ fn registers_all_identity_tiers() {
     );
     assert_eq!(anonymous.tier, TIER_SILENT_WITNESS);
     assert_eq!(anonymous.nullifier, Some(bytes32(&env, 4)));
-    assert!(client.has_nullifier(&bytes32(&env, 4)));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &bytes32(&env, 4)));
 
     let pseudonymous = client.register_source(
         &source,
@@ -218,7 +218,7 @@ fn registers_silent_witness_through_external_verifier() {
     assert_eq!(record.tier, TIER_SILENT_WITNESS);
     assert_eq!(record.video_hash, video_hash);
     assert_eq!(record.nullifier, Some(nullifier.clone()));
-    assert!(client.has_nullifier(&nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier));
     // Non-batch registration has batch_size = 0
     assert_eq!(record.batch_size, 0);
 }

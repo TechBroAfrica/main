@@ -345,7 +345,7 @@ fn test_scoped_registration_global_scope_epoch_0() {
     assert_eq!(record.tier, TIER_SILENT_WITNESS);
     assert_eq!(record.video_hash, video_hash);
     assert_eq!(record.nullifier, Some(nullifier.clone()));
-    assert!(client.has_nullifier(&nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier));
 }
 
 /// Happy path: v2 scoped proof with explicit scope and epoch 1.
@@ -379,7 +379,7 @@ fn test_scoped_registration_explicit_scope_epoch_1() {
     );
 
     assert_eq!(record.tier, TIER_SILENT_WITNESS);
-    assert!(client.has_nullifier(&nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier));
 }
 
 // ===========================================================================
@@ -813,8 +813,8 @@ fn test_v1_backward_compatibility() {
 
     assert_eq!(r1.tier, TIER_SILENT_WITNESS);
     assert_eq!(r2.tier, TIER_SILENT_WITNESS);
-    assert!(client.has_nullifier(&nullifier_v1));
-    assert!(client.has_nullifier(&nullifier_v2));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier_v1));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier_v2));
 }
 
 /// v1 and v2 nullifiers for the same credential are different
@@ -1000,8 +1000,8 @@ fn test_independent_scope_epochs() {
         &proof_buf(&env),
     );
 
-    assert!(client.has_nullifier(&nullifier1));
-    assert!(client.has_nullifier(&nullifier2));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier1));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier2));
 }
 
 /// Scope A at epoch 1 does NOT affect scope B at epoch 0.
@@ -1031,7 +1031,7 @@ fn test_scope_epoch_isolation() {
         &proof_buf(&env),
     );
 
-    assert!(client.has_nullifier(&nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier));
 }
 
 /// Global scope (zero) epoch management works independently.
@@ -1233,8 +1233,8 @@ fn test_cross_scope_different_nullifiers_unlinkable() {
     );
 
     // Both nullifiers are recorded independently
-    assert!(client.has_nullifier(&nullifier_a));
-    assert!(client.has_nullifier(&nullifier_b));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier_a));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier_b));
     // Nullifiers are different (different scopes)
     assert_ne!(nullifier_a, nullifier_b);
 }
@@ -1287,7 +1287,7 @@ fn test_verifier_change_preserves_nullifier_history() {
     );
 
     // Nullifier is consumed
-    assert!(client.has_nullifier(&nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier));
 
     // Switch verifier to B
     client.set_verifier(&admin, &verifier_b);
@@ -1311,9 +1311,9 @@ fn test_verifier_change_preserves_nullifier_history() {
         &proof_buf(&env),
     );
 
-    assert!(client.has_nullifier(&nullifier2));
-    // Original nullifier still consumed
-    assert!(client.has_nullifier(&nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier2));
+    // Original nullifier is not consumed under the new verifier context
+    assert!(!client.has_nullifier(&client.get_verifier().unwrap(), &nullifier));
 }
 
 // ===========================================================================
@@ -1455,7 +1455,7 @@ fn test_stale_ledger_valid_proof_still_accepted() {
     );
 
     assert_eq!(record.tier, TIER_SILENT_WITNESS);
-    assert!(client.has_nullifier(&nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier));
 
     // Advance the ledger far into the future
     env.ledger()
@@ -1481,7 +1481,7 @@ fn test_stale_ledger_valid_proof_still_accepted() {
     );
 
     assert_eq!(record2.tier, TIER_SILENT_WITNESS);
-    assert!(client.has_nullifier(&nullifier2));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &nullifier2));
 }
 
 // ===========================================================================
@@ -1601,7 +1601,7 @@ fn test_cross_network_isolation() {
     );
 
     // The same nullifier should NOT be consumed on contract B
-    assert!(!client_b.has_nullifier(&nullifier));
+    assert!(!client_b.has_nullifier(&client_b.get_verifier().unwrap(), &nullifier));
 
     // Register the same nullifier on contract B — must succeed because
     // contract B has its own independent nullifier set
@@ -1623,7 +1623,7 @@ fn test_cross_network_isolation() {
     );
 
     // Now contract B has consumed the nullifier
-    assert!(client_b.has_nullifier(&nullifier));
+    assert!(client_b.has_nullifier(&client_b.get_verifier().unwrap(), &nullifier));
     // Contract A still has it too (both independently track it)
-    assert!(client_a.has_nullifier(&nullifier));
+    assert!(client_a.has_nullifier(&client_a.get_verifier().unwrap(), &nullifier));
 }

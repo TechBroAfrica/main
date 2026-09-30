@@ -322,7 +322,7 @@ fn check_lookups(client: &HarpocratesRegistryClient<'_>, model: &Model, env: &En
         );
         if let Some(n) = p.nullifier {
             assert!(
-                client.has_nullifier(&b32(env, slot_byte(0xD4, n))),
+                client.has_nullifier(&client.get_verifier().unwrap(), &b32(env, slot_byte(0xD4, n))),
                 "{label}: missing nullifier slot={n}"
             );
         }

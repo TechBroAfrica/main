@@ -277,7 +277,7 @@ fn deployment_fixture_init_state_is_consistent() {
     // No proofs yet.
     let unknown_proof = slot(&f.env, domains::PROOF, 0xFF);
     assert!(client.get_proof(&unknown_proof).is_none());
-    assert!(!client.has_nullifier(&slot(&f.env, domains::NULLIFIER, 0)));
+    assert!(!client.has_nullifier(&client.get_verifier().unwrap(), &slot(&f.env, domains::NULLIFIER, 0)));
 }
 
 #[test]
@@ -322,7 +322,7 @@ fn deployment_fixture_all_tiers_register_successfully() {
     );
     assert_eq!(anon_rec.tier, TIER_SILENT_WITNESS);
     assert_eq!(anon_rec.nullifier, Some(anon_nullifier.clone()));
-    assert!(client.has_nullifier(&anon_nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &anon_nullifier));
 
     // Tier 1 – anonymous_verified (uses mock verifier + public inputs).
     let av_proof_id = slot(&f.env, domains::PROOF, 0x02);
@@ -338,7 +338,7 @@ fn deployment_fixture_all_tiers_register_successfully() {
         &proof_buf(&f.env),
     );
     assert_eq!(av_rec.tier, TIER_SILENT_WITNESS);
-    assert!(client.has_nullifier(&av_nullifier));
+    assert!(client.has_nullifier(&client.get_verifier().unwrap(), &av_nullifier));
 
     // Tier 2 – consistent source.
     let src_proof_id = slot(&f.env, domains::PROOF, 0x03);
