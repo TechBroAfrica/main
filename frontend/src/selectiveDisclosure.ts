@@ -19,7 +19,7 @@ async function getBB(): Promise<Barretenberg> {
 
 async function pedersenHash(inputs: bigint[]): Promise<bigint> {
   const bb = await getBB()
-  const result = await bb.pedersenHash(inputs.map((value) => new Fr(value)), 0)
+  const result = await bb.pedersenHash(inputs.map((input) => new Fr(input)), 0)
   return BigInt(result.toString())
 }
 
