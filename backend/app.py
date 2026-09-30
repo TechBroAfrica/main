@@ -145,6 +145,32 @@ if not LOGGER.handlers:
 LOGGER.setLevel(logging.INFO)
 LOGGER.propagate = False
 
+# ---------------------------------------------------------------------------
+# Declared upload-body budget
+# ---------------------------------------------------------------------------
+# A ``multipart/form-data`` upload carries framing bytes (boundaries, part
+# headers, and the small metadata part) on top of the video/chunk payload, so
+# the declared ``Content-Length`` budget allows a fixed overhead on top of the
+# per-file budget.  Without this allowance a payload sitting exactly on
+# ``MAX_VIDEO_BYTES`` would be rejected purely because of framing.
+UPLOAD_MULTIPART_OVERHEAD_BYTES = 1_048_576
+
+
+def declared_upload_limit_bytes(config) -> int:
+    """Return the largest acceptable declared ``Content-Length`` for an upload.
+
+    The per-file budget is ``UPLOAD_MAX_BYTES`` when the deployment sets it,
+    otherwise ``MAX_VIDEO_BYTES``; multipart framing is permitted on top of it.
+    The whole body must still fit under ``MAX_CONTENT_LENGTH`` when that cap is
+    the lower of the two, so the effective limit is the minimum of the two.
+    """
+    per_file = int(getattr(config, "upload_max_bytes", 0) or config.max_video_bytes)
+    limit = per_file + UPLOAD_MULTIPART_OVERHEAD_BYTES
+    global_cap = int(getattr(config, "max_content_length", 0) or 0)
+    if global_cap and limit > global_cap:
+        limit = global_cap
+    return limit
+
 
 def _make_key_func(config):
     """Return a rate-limit key function that uses the real client IP.
