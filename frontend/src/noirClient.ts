@@ -13,7 +13,15 @@ import {
 const MAX_AGGREGATION_SIZE = 8
 const AGGREGATED_PUBLIC_INPUT_BYTES = 32 + (MAX_AGGREGATION_SIZE * 128)
 
-type SilentWitnessProof = {
+import {
+  checkAggregationBatchSize,
+  encodeFieldToBytes32Hex,
+  encodePublicInputs,
+  MAX_AGGREGATION_SIZE,
+  MIN_AGGREGATION_SIZE,
+} from './verifierInputs'
+
+export type SilentWitnessProof = {
   credentialRoot: string
   nullifier: string
   /** 32-byte hex domain tag, present only when the circuit exposes one. */
@@ -25,7 +33,7 @@ type SilentWitnessProof = {
   publicInputBytes: number
 }
 
-type AggregatedProof = {
+export type AggregatedProof = {
   protocol: string
   version: number
   type: string
@@ -54,6 +62,38 @@ let helperCircuitPromise: Promise<LoadedCircuit> | null = null
 let mainCircuitPromise: Promise<LoadedCircuit> | null = null
 let aggregatorCircuitPromise: Promise<LoadedCircuit> | null = null
 let aggregatorHelperCircuitPromise: Promise<LoadedCircuit> | null = null
+
+async function loadCircuit(path: string): Promise<CompiledCircuit> {
+  const response = await fetch(path, { cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error(`Unable to load Noir circuit artifact: ${path}`)
+  }
+  return (await response.json()) as CompiledCircuit
+}
+
+async function loadHelperCircuit(): Promise<CompiledCircuit> {
+  helperCircuitPromise ??= loadCircuit('/noir/silent_witness_helper.json')
+  return helperCircuitPromise
+}
+
+async function loadMainCircuit(): Promise<CompiledCircuit> {
+  mainCircuitPromise ??= loadCircuit('/noir/silent_witness.json')
+  return mainCircuitPromise
+}
+
+async function loadAggregatorCircuit(): Promise<CompiledCircuit> {
+  aggregatorCircuitPromise ??= loadCircuit('/noir/silent_witness_aggregator.json')
+  return aggregatorCircuitPromise
+}
+
+async function loadAggregatorHelperCircuit(): Promise<CompiledCircuit> {
+  aggregatorHelperCircuitPromise ??= loadCircuit('/noir/silent_witness_aggregator_helper.json')
+  return aggregatorHelperCircuitPromise
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
 
 /**
  * Generate a Silent Witness Noir/UltraHonk proof.

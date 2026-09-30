@@ -121,3 +121,10 @@ fn test_helper_consistent_output() {
     assert(result[6].1 == std::hash::pedersen_hash([cs, ns, z + 50, z + 50]), "malformed");
     assert(result[7].1 == std::hash::pedersen_hash([cs, ns, z + 60, z + 60]), "malformed");
 }
+
+/// Verify aggregation bound constants.
+#[test]
+fn test_aggregation_bound_constants() {
+    assert(MAX_AGGREGATION_SIZE == 8);
+}
+

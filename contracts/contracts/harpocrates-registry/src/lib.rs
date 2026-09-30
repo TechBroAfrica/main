@@ -5,8 +5,10 @@ extern crate std;
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
-    Bytes, BytesN, Env, IntoVal, InvokeError, Symbol, Val, Vec as SorobanVec,
+    Bytes, BytesN, Env, IntoVal, InvokeError, Symbol, Val, Vec,
 };
+
+pub type SorobanVec<T> = Vec<T>;
 
 pub mod verifier_inputs;
 
@@ -347,6 +349,7 @@ pub enum ProposalAction {
 }
 
 pub const DEFAULT_SCOPE_EPOCH: u64 = 0;
+pub const MIN_AGGREGATION_SIZE: u32 = 1;
 pub const MAX_AGGREGATION_SIZE: u32 = 8;
 pub const AGGREGATION_DOMAIN_SEPARATOR: [u8; 32] = [0u8; 32];
 
@@ -4955,7 +4958,7 @@ fn stamp_default_metadata_envelope(env: &Env, proof_id: &BytesN<32>, metadata_ha
 
 fn validate_lineage(
     env: &Env,
-    parent_proof_ids: &SorobanVec<BytesN<32>>,
+    parent_proof_ids: &Vec<BytesN<32>>,
     output_digest: &BytesN<32>,
     depth: u32,
 ) {

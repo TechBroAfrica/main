@@ -479,3 +479,19 @@ def check_revocation_witness_depth(depth: object) -> None:
         raise VerifierInputError(RejectCode.LENGTH, "depth")
     if depth > MAX_REVOCATION_WITNESS_DEPTH:
         raise VerifierInputError(RejectCode.PROOF_OVERSIZE, "depth")
+
+
+def check_aggregation_batch_size(batch_size: object) -> int:
+    """Reject an aggregation proof count outside the protocol bound (#497).
+
+    Privacy-safe: raises :class:`VerifierInputError` with a stable code and the
+    field name ``batch_size`` only — never video hashes, secrets, or witness material.
+    """
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+        raise VerifierInputError(RejectCode.MALFORMED_HEX, "batch_size")
+    if batch_size < MIN_AGGREGATION_SIZE:
+        raise VerifierInputError(RejectCode.LENGTH, "batch_size")
+    if batch_size > MAX_AGGREGATION_SIZE:
+        raise VerifierInputError(RejectCode.PROOF_OVERSIZE, "batch_size")
+    return batch_size
+
