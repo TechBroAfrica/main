@@ -112,6 +112,7 @@ Each assumption is a potential attack surface if violated.
 | D7 | Circuit artifacts in `frontend/public/noir/` match the circuit used to generate `RegistryWasmHash`-era verifier keys. | Browser-generated proofs fail on-chain verification or (worse) a stale verifier accepts proofs from a replaced circuit. |
 | D8 | Stellar Testnet ledger timestamps are monotonically increasing and not manipulable by a single validator. | Proof TTL enforcement can be bypassed. |
 | D9 | ffmpeg/ffprobe binaries on the backend host are from a trusted, unmodified distribution. | Malicious ffmpeg could exfiltrate video frames or corrupt steganographic output. |
+| D10 | Deployment containers execute as dedicated unprivileged non-root users (`harpocrates` UID 10001 for backend, `nginx` UID 101 for frontend) with `no-new-privileges:true`. | Vulnerability in runtime dependencies (e.g. ffmpeg or nginx parser) could lead to container breakout or host root compromise. |
 
 
 ---
@@ -697,6 +698,7 @@ must be reconciled against on-chain data for any security-sensitive decision.
 | Offline local verification — zero network calls, no storage/log writes, and never a confirmed trust decision; envelope extraction reuses the existing single stego loader (no second protocol truth) and secret-shaped envelopes are rejected up-front | T4, T5 | `offlineVerification.ts`, `useVerification.ts` |
 | Hex normalization and validation on all hash inputs | T1, T8 | `stellarEncoding.ts` → `asHex32`, `asHexBytes` |
 | `CONTRACT_NETWORK_PASSPHRASE` exported constant used by guard | T1 | `harpocratesRegistry.ts` |
+| Non-root container execution (`nginx` UID 101) with unprivileged PID path (`/tmp/nginx.pid`) and `no-new-privileges:true` | T4 | `frontend/Dockerfile`, `docker-compose.yml` |
 
 ### 7.4 Noir ZK Circuits
 

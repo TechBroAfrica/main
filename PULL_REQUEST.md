@@ -1,4 +1,4 @@
-# Bounded Aggregation of Silent Witness Proofs
+# chore(devx): run deployment containers as non-root
 
 ## Summary
 
@@ -6,7 +6,7 @@ Caps aggregation proof count between `MIN_AGGREGATION_SIZE = 1` and `MAX_AGGREGA
 
 Closes #488
 
-## Motivation
+---
 
 Harpocrates handles privacy-sensitive media, proof material, Stellar transactions, and on-chain verification. Unbounded batch sizes would risk witness extraction, prover resource exhaustion, and memory DoS attacks across browser, host, and contract boundaries. This change is production-grade: secure by default, bounded under hostile inputs, observable without leaking evidence or witnesses, and recoverable across partial failures.
 
