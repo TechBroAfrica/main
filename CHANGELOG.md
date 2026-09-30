@@ -2,6 +2,25 @@
 
 ## 1.0.0 — Unreleased
 
+- Added a **circuit-versioned proof envelope** for the scoped silent witness
+  proof (#368): `silent_witness/v2` / `hpx-vi/2` is the 224-byte scoped frame plus
+  a trailing 32-byte `circuit_version` field element (8 × 32 = 256 bytes), and the
+  Noir circuit asserts that value against `CURRENT_CIRCUIT_VERSION` in-circuit, so
+  a proof names the circuit that produced it instead of leaving a verifier to
+  infer the version from a byte count. The envelope is **required** on the
+  registration path: `register_anonymous_verified` rejects the superseded bare
+  224-byte frame with `RegistryError::CircuitVersionMismatch` (new ABI code 87 in
+  `contracts/ERROR_ABI.md`) before the verifier is reached, so no proof can skip
+  the version commitment by omitting the trailer. `hpx-vi/1` (160-byte
+  `silent_witness/v1`, 128-byte revocation) is byte-for-byte unchanged, and
+  `circuit_version` is never written to `ProofRecord`, so stored evidence is
+  unaffected. Built the scoped ACIR with the pinned toolchain — 21 `nargo test`
+  cases pass, including the version-downgrade rejection — and refreshed the source
+  digests that cover it (`zk/circuit.provenance.json`,
+  `release/compatibility-manifest.json`); the tracked published browser artifacts
+  are a different, digest-pinned circuit shape and stay unchanged. Added a
+  `verifier_conformance_v2.json` corpus and put `nargo test` for the silent
+  witness circuits in CI. See `MIGRATION_GUIDE.md` and `THREAT_MODEL.md` (OR-5).
 - Added bounded **issuer rotation grace windows** to the Soroban registry (#323).
   `rotate_issuer` retires an active issuer key in favour of a replacement and
   opens a bounded window (default `DEFAULT_ISSUER_ROTATION_GRACE_SECS`, capped by

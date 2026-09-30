@@ -33,7 +33,7 @@ struct MockVerifierUpgrade;
 #[contractimpl]
 impl MockVerifierUpgrade {
     pub fn verify_proof(_env: Env, public_inputs: Bytes, proof: Bytes) {
-        if !matches!(public_inputs.len(), 128 | 160 | 224) || proof.is_empty() {
+        if !matches!(public_inputs.len(), 128 | 160 | 224 | 256) || proof.is_empty() {
             panic!("invalid proof");
         }
     }

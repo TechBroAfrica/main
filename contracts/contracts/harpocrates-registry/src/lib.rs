@@ -20,6 +20,10 @@ use verifier_inputs::{RejectCode, PUBLIC_INPUTS_LEN, REVOCATION_PUBLIC_INPUTS_LE
 /// Schema selectors accepted by [`HarpocratesRegistry::classify_public_inputs`].
 pub const SCHEMA_ID_SILENT_WITNESS: u32 = 1;
 pub const SCHEMA_ID_REVOCATION_WITNESS: u32 = 2;
+/// Circuit-versioned silent-witness envelope (`silent_witness/v2`, #368).
+/// Distinct from [`SCHEMA_ID_SILENT_WITNESS`] so `classify_public_inputs` can
+/// enforce the appended circuit-version field without touching the v1 codec.
+pub const SCHEMA_ID_SILENT_WITNESS_V2: u32 = 3;
 
 /// Maximum Merkle depth for the `revocation_witness` circuit (#357).
 /// Must match `MAX_REVOCATION_WITNESS_DEPTH` in the Noir circuit and host tooling.
@@ -1062,8 +1066,31 @@ pub const DOMAIN_NETWORK_FIELD: [u8; 32] = [
 /// Expected length of v1 public inputs (5 × 32 = 160 bytes, including domain_tag).
 const SILENT_WITNESS_V1_INPUT_LEN: u32 = 160;
 
-/// Expected length of v2 scoped public inputs (7 × 32 = 224 bytes, including domain_tag).
-const SILENT_WITNESS_V2_INPUT_LEN: u32 = 224;
+/// Length of the superseded bare v2 scoped frame (7 x 32 = 224 bytes, including
+/// domain_tag). It commits no circuit version, so a verifier could only *infer*
+/// one from the length. `register_anonymous_verified` rejects it outright with
+/// [`RegistryError::CircuitVersionMismatch`]; it is declared here only so that
+/// the rejection has a named, documented length instead of falling through to
+/// the generic `InvalidPublicInputs` arm.
+const SILENT_WITNESS_V2_BARE_INPUT_LEN: u32 = 224;
+
+/// Expected length of the circuit-versioned v2 envelope (#368): the 224-byte
+/// scoped frame plus a trailing 32-byte `circuit_version` field element. This
+/// is the `silent_witness/v2` frame of the canonical codec, so the length comes
+/// from [`verifier_inputs::SILENT_WITNESS_V2_PUBLIC_INPUTS_LEN`] rather than
+/// being restated here.
+///
+/// [`HarpocratesRegistry::register_anonymous_verified`] accepts only this frame
+/// for the v2 path; a trailer other than
+/// [`verifier_inputs::EXPECTED_CIRCUIT_VERSION`] is rejected with
+/// [`RegistryError::CircuitVersionMismatch`].
+const SILENT_WITNESS_V2_ENVELOPED_INPUT_LEN: u32 =
+    verifier_inputs::SILENT_WITNESS_V2_PUBLIC_INPUTS_LEN as u32;
+
+/// Byte offset of the trailing `circuit_version` field inside the envelope: the
+/// envelope is the scoped frame followed by exactly one field element.
+const CIRCUIT_VERSION_TRAILER_OFFSET: usize =
+    verifier_inputs::SILENT_WITNESS_V2_PUBLIC_INPUTS_LEN - verifier_inputs::FIELD_LEN;
 
 #[contractevent(topics = ["revroot", "set"])]
 pub struct RevocationRootSet {
@@ -1489,6 +1516,10 @@ pub enum RegistryError {
     IssuerRotationNotFound = 85,
     /// The issuer rotation grace window has not lapsed yet (#323).
     IssuerRotationGraceStillActive = 86,
+    /// A scoped-nullifier envelope carried a `circuit_version` trailer other
+    /// than [`verifier_inputs::EXPECTED_CIRCUIT_VERSION`], or was the superseded
+    /// bare 224-byte frame that commits no circuit version at all (#368).
+    CircuitVersionMismatch = 87,
 }
 
 #[contract]
@@ -2410,8 +2441,15 @@ impl HarpocratesRegistry {
 
         let input_len = public_inputs.len();
 
-        let record = if input_len == SILENT_WITNESS_V2_INPUT_LEN {
-            // v2 scoped nullifier path
+        let record = if input_len == SILENT_WITNESS_V2_BARE_INPUT_LEN {
+            // The bare v2 frame predates #368 and commits no circuit version, so
+            // the verifier could only infer one from the length. Rejecting it by
+            // length here means a proof cannot dodge the version commitment by
+            // omitting the trailer.
+            panic_with_error!(&env, RegistryError::CircuitVersionMismatch);
+        } else if input_len == SILENT_WITNESS_V2_ENVELOPED_INPUT_LEN {
+            // v2 scoped nullifier path; the circuit-version envelope trailer is
+            // mandatory (#368).
             let parsed = parse_scoped_silent_witness_public_inputs(&env, &public_inputs);
             if parsed.video_hash != video_hash {
                 panic_with_error!(&env, RegistryError::InvalidPublicInputs);
@@ -3793,10 +3831,11 @@ impl HarpocratesRegistry {
     /// size and no storage is touched, so it is safe to expose publicly and
     /// safe to call while any domain is paused.
     ///
-    /// `schema_id` is [`SCHEMA_ID_SILENT_WITNESS`] or
-    /// [`SCHEMA_ID_REVOCATION_WITNESS`]. `proof_len` is the length of the proof
-    /// blob the caller intends to submit — passed as a length rather than the
-    /// blob itself so classification never transports proof material.
+    /// `schema_id` is [`SCHEMA_ID_SILENT_WITNESS`],
+    /// [`SCHEMA_ID_SILENT_WITNESS_V2`], or [`SCHEMA_ID_REVOCATION_WITNESS`].
+    /// `proof_len` is the length of the proof blob the caller intends to submit
+    /// — passed as a length rather than the blob itself so classification never
+    /// transports proof material.
     ///
     /// Returns [`verifier_inputs::ACCEPTED_CODE`] (`0`) when the material is
     /// canonical, otherwise the stable [`RejectCode::as_code`] value. This is
@@ -3816,14 +3855,22 @@ impl HarpocratesRegistry {
         // Schema dispatch precedes the length check, matching the Python and
         // TypeScript layers: an unrecognised schema is reported as such even
         // when the frame is also the wrong length.
-        if schema_id != SCHEMA_ID_SILENT_WITNESS && schema_id != SCHEMA_ID_REVOCATION_WITNESS {
+        if schema_id != SCHEMA_ID_SILENT_WITNESS
+            && schema_id != SCHEMA_ID_SILENT_WITNESS_V2
+            && schema_id != SCHEMA_ID_REVOCATION_WITNESS
+        {
             return RejectCode::UnknownSchema.as_code();
         }
 
-        // Each schema has its own frame length (silent witness 160 bytes,
-        // revocation 128 bytes), matching `verifier_inputs::classify`.
-        let expected_len: u32 = if schema_id == SCHEMA_ID_SILENT_WITNESS {
+        // Each schema has its own frame length (silent witness v1 160 bytes,
+        // the circuit-versioned v2 envelope 256 bytes, revocation 128 bytes),
+        // matching `verifier_inputs::classify`.
+        let silent_v1 = schema_id == SCHEMA_ID_SILENT_WITNESS;
+        let silent_v2 = schema_id == SCHEMA_ID_SILENT_WITNESS_V2;
+        let expected_len: u32 = if silent_v1 {
             SILENT_WITNESS_V1_INPUT_LEN
+        } else if silent_v2 {
+            verifier_inputs::SILENT_WITNESS_V2_PUBLIC_INPUTS_LEN as u32
         } else {
             REVOCATION_PUBLIC_INPUTS_LEN as u32
         };
@@ -3831,10 +3878,18 @@ impl HarpocratesRegistry {
             return RejectCode::Length.as_code();
         }
 
-        let parsed = if schema_id == SCHEMA_ID_SILENT_WITNESS {
+        let parsed = if silent_v1 {
             let mut frame = [0u8; PUBLIC_INPUTS_LEN];
             public_inputs.copy_into_slice(&mut frame);
             verifier_inputs::parse_silent_witness(
+                &frame,
+                &verifier_inputs::SILENT_WITNESS_DOMAIN_TAG_BE,
+            )
+            .map(|_| ())
+        } else if silent_v2 {
+            let mut frame = [0u8; verifier_inputs::SILENT_WITNESS_V2_PUBLIC_INPUTS_LEN];
+            public_inputs.copy_into_slice(&mut frame);
+            verifier_inputs::parse_silent_witness_v2(
                 &frame,
                 &verifier_inputs::SILENT_WITNESS_DOMAIN_TAG_BE,
             )
@@ -5149,27 +5204,33 @@ struct ScopedSilentWitnessInputs {
     domain_tag: BytesN<32>,
 }
 
-/// Parse the 224-byte public-input blob produced by the v2 scoped
-/// silent_witness Noir circuit.
+/// Parse the public-input blob produced by the v2 scoped silent_witness Noir
+/// circuit: the 256-byte envelope carrying the circuit-version trailer (#368).
 ///
-/// Layout (7 x BN254 field elements, 32 bytes each):
-///   [  0.. 32)  video_hash_hi + video_hash_lo (packed)
-///   [ 32.. 64)  video_hash_lo continued
-///   [ 64.. 96)  credential_root
-///   [ 96..128)  nullifier
-///   [128..160)  verifier_scope
-///   [160..192)  epoch
-///   [192..224)  domain_tag
+/// The envelope appends a 32-byte `circuit_version` field that the producing
+/// circuit asserted in-circuit, so the proof names its own circuit; it must
+/// decode to [`verifier_inputs::EXPECTED_CIRCUIT_VERSION`] or the registration
+/// is rejected with [`RegistryError::CircuitVersionMismatch`]. The superseded
+/// bare 224-byte frame is rejected at the dispatch in
+/// [`HarpocratesRegistry::register_anonymous_verified`] before this parser runs,
+/// so no proof can skip the version commitment.
 fn parse_scoped_silent_witness_public_inputs(
     env: &Env,
     public_inputs: &Bytes,
 ) -> ScopedSilentWitnessInputs {
-    if public_inputs.len() != SILENT_WITNESS_V2_INPUT_LEN {
+    let input_len = public_inputs.len();
+    if input_len != SILENT_WITNESS_V2_ENVELOPED_INPUT_LEN {
         panic_with_error!(env, RegistryError::InvalidPublicInputs);
     }
 
-    let mut bytes = [0u8; 224];
+    let mut bytes = [0u8; verifier_inputs::SILENT_WITNESS_V2_PUBLIC_INPUTS_LEN];
     public_inputs.copy_into_slice(&mut bytes);
+
+    let mut trailer = [0u8; verifier_inputs::FIELD_LEN];
+    trailer.copy_from_slice(&bytes[CIRCUIT_VERSION_TRAILER_OFFSET..]);
+    if verifier_inputs::circuit_version_of(&trailer) != verifier_inputs::EXPECTED_CIRCUIT_VERSION {
+        panic_with_error!(env, RegistryError::CircuitVersionMismatch);
+    }
 
     // Reassemble video_hash: hi occupies bytes 16..32 of the first field word,
     // lo occupies bytes 48..64 of the second field word (UltraHonk packs 128-bit
