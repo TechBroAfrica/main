@@ -51,10 +51,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 VALIDATION_ERROR = "VALIDATION_ERROR"
-"""Client-supplied data failed validation (400)."""
+"""Legacy client-validation code retained for compatibility (400)."""
 
 PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
-"""Request body exceeds the configured size limit (413)."""
+"""Legacy payload-limit code retained for compatibility (413)."""
 
 NOT_FOUND = "NOT_FOUND"
 """The requested resource or capability is unavailable (404)."""
@@ -94,6 +94,11 @@ def error_response(
     field: str | None = None,
 ) -> tuple[Response, int]:
     """Return a Flask response tuple for a standardized error envelope.
+
+    The legacy ``code`` value remains the stable public contract for compatible
+    callers. A second ``cli_code`` field is added for CLI and automation tooling
+    that needs a lowercase, shell-friendly identifier without breaking existing
+    integrations.
 
     Args:
         code: Machine-readable error code (one of the module-level constants,
